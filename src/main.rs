@@ -1,59 +1,58 @@
-use axum::{
-    http::StatusCode,
-    routing::{get, post},
-    Json, Router,
-};
+use actix_web::{web, App, HttpServer, HttpResponse, Responder, get, post};
 use serde::{Deserialize, Serialize};
-use tokio;
-use tower_http::trace::{self, TraceLayer};
-use tracing::Level;
+use uuid::Uuid;
 
-#[tokio::main]
-async fn main() {
-    // Inicializar el sistema de logging
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .compact()
-        .init();
-
-    // Crear el enrutador con las rutas de facturas y capa de logging
-    let app = Router::new()
-        .route("/invoice", post(create_invoice))
-        .route("/health", get(health_status))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(trace::DefaultMakeSpan::new().level(Level::INFO)) // Registra las solicitudes a nivel INFO
-                .on_response(trace::DefaultOnResponse::new().level(Level::INFO)), // Registra las respuestas a nivel INFO
-        );
-
-    // Iniciar el servidor
-    axum::Server::bind(&"127.0.0.1:4321".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-}
-
-// Estructura para la factura (invoice)
+// Estructura de la Factura
 #[derive(Serialize, Deserialize)]
-struct Invoice {
-    id: String,
+struct Factura {
+    id: Uuid,
+    cliente: String,
     total: f64,
-    customer: String,
+    detalle: Vec<DetalleFactura>,
 }
 
-// Ruta para crear una nueva factura
-async fn create_invoice(Json(payload): Json<Invoice>) -> Result<Json<Invoice>, StatusCode> {
-    if payload.total <= 0.0 {
-        // Si el total de la factura es inválido, devolver un error 400 (Bad Request)
-        Err(StatusCode::BAD_REQUEST)
-    } else {
-        // Enviar la factura creada como respuesta (status 200 OK)
-        Ok(Json(payload))
-    }
+#[derive(Serialize, Deserialize)]
+struct DetalleFactura {
+    descripcion: String,
+    cantidad: u32,
+    precio_unitario: f64,
 }
 
-// Ruta para verificar el estado del sistema
-async fn health_status() -> Result<&'static str, StatusCode> {
-    // Devolver un mensaje de estado (status 200 OK)
-    Ok("UP")
+#[get("/health")]
+async fn health_check() -> impl Responder {
+    HttpResponse::Ok().body("ok!")
+}
+
+#[get("/factura")]
+async fn obtener_factura() -> impl Responder {
+    HttpResponse::Ok().json(Factura {
+        id: Uuid::new_v4(),
+        cliente: String::from("Cliente Ejemplo"),
+        total: 1000.0,
+        detalle: vec![
+            DetalleFactura {
+                descripcion: String::from("Producto A"),
+                cantidad: 2,
+                precio_unitario: 500.0,
+            }
+        ],
+    })
+}
+
+#[post("/factura")]
+async fn crear_factura(factura: web::Json<Factura>) -> impl Responder {
+    HttpResponse::Ok().json(factura.into_inner())
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| {
+        App::new()
+            .service(health_check)
+            .service(obtener_factura)  // GET /factura
+            .service(crear_factura)    // POST /factura
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
 }
